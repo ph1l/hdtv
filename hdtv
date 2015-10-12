@@ -1,30 +1,275 @@
 #!/usr/bin/env python2.7
-#
 
-import getopt, sys
+import getopt
+import os, os.path
+import re
+import socket
+import sys
+import time
+
+CONFIG_DIR="%s/.hdtv" % (os.getenv("HOME", default="."))
+LOCAL_PORT=1234
+
+
+class HdhrException(Exception):
+    """
+    """
+    pass
+
+
+class Hdhr(object):
+    """
+    """
+    HDHR_CFG_CMD="/usr/bin/hdhomerun_config"
+
+    def HdhrCMD(self, cmdstr):
+        cmd = "%s %s"%(self.HDHR_CFG_CMD, cmdstr)
+        print "DEBUG: HdhrCMD=\"%s\""%(cmdstr)
+        if os.system(cmd) != 0:
+            raise HdhrException("ERROR: %s"%(cmd))
+        return None
+
+    def HdhrGet(self, key):
+        #TODO: should return the text from the command
+        cmd = "%s %s get %s"%(self.HDHR_CFG_CMD, self.device_id, key)
+        if os.system(cmd) != 0:
+            raise HdhrException("ERROR: %s"%(cmd))
+        return None
+
+    def HdhrSet(self, key, value):
+        cmd = "%s %s set %s %s"%(
+                self.HDHR_CFG_CMD,
+                self.getDeviceId(),
+                key, value,
+            )
+        if os.system(cmd) != 0:
+            raise HdhrException("ERROR: %s"%(cmd))
+        return None
+
+
+class Device(Hdhr):
+    """
+    """
+
+    def __init__(self, device_id=None):
+        if not os.path.exists(CONFIG_DIR):
+            os.mkdir(CONFIG_DIR)
+        if device_id == None:
+            device_id=self.__getDefaultDevice()
+        self.device_id = device_id
+        self.tuner = None
+
+    def __str__(self):
+        return "Device %s"%(self.device_id)
+
+    def __getDefaultDevice(self):
+        #TODO: This should return a device id from discover
+        self.HdhrCMD("discover")
+        return "10176195"
+
+    def getDeviceId(self):
+        return self.device_id
+
+    def selectTuner(self, tuner_id):
+        self.tuner = Tuner(self, tuner_id)
+        return self.tuner
+
+
+class Tuner(Hdhr):
+    """
+    """
+
+    def __init__(self, device, tuner_number):
+        self.device = device
+        self.tuner_id=tuner_number
+        self.channel_list=[]
+        self.__tuner_cache_file="%s/tuner%d.cache"%(CONFIG_DIR,self.tuner_id)
+        if not os.path.exists(self.__tuner_cache_file):
+            print "building channel scan cache (%s)..."%(
+                    self.__tuner_cache_file)
+            #TODO: the following returns non-zero exit code...
+            self.HdhrCMD("%s scan /tuner%d %s"%(
+                            self.device.device_id,
+                            self.tuner_id,
+                            self.__tuner_cache_file
+                        ))
+        #Load Channel info from Cache
+        re_channel=re.compile("^SCANNING: [0-9]+ \(.*:([0-9]+)\)$")
+        re_lock=re.compile("^LOCK: ([^ ]+) \(.*\)$")
+        re_program=re.compile("^PROGRAM ([0-9]+): (.*)$")
+        channel_number=0
+        channel=None
+        f = open(self.__tuner_cache_file)
+        for l in f.readlines():
+            m = re_channel.match(l)
+            if m:
+                channel_number = int(m.group(1))
+                continue
+
+            m = re_lock.match(l)
+            if m:
+                lock = m.group(1)
+                if lock != "none":
+                        channel=Channel(self, channel_number)
+                        self.channel_list.append(channel)
+
+            m = re_program.match(l)
+            if m:
+                program_number = int(m.group(1))
+                program_description = m.group(2)
+                channel.addProgram(program_number,program_description)
+
+    def __str__(self):
+        return "Tuner %d"%(self.number)
+
+    def getDeviceId(self):
+        return self.device.device_id
+
+    def getChannels(self):
+        return self.channel_list
+
+    def setTarget(self, host, port):
+        self.HdhrSet("/tuner%d/target"%(self.tuner_id), "%s:%s"%(host, port))
+
+
+class Channel(Hdhr):
+    """
+    """
+
+    def __init__(self, tuner, channel_number):
+        self.tuner=tuner
+        self.number=int(channel_number)
+        self.program_list=[]
+
+    def __str__(self):
+        return "Channel %d"%(self.number)
+
+    def getDeviceId(self):
+        return self.tuner.device.device_id
+
+    def addProgram(self, program_number, description):
+        self.program_list.append(Program(self,program_number,description))
+
+    def getPrograms(self):
+        return self.program_list
+
+    def setChannel(self):
+        self.HdhrSet("/tuner%d/channel"%(self.tuner.tuner_id),self.number)
+
+
+class Program(Hdhr):
+    """
+    """
+
+    def __init__(self, channel, program_number, description):
+        self.channel=channel
+        self.number=program_number
+        self.description=description
+
+    def __str__(self):
+        return "Program %d: %s"%(self.number,self.description)
+
+    def getDeviceId(self):
+        return self.channel.tuner.device.device_id
+
+    def setProgram(self):
+        self.channel.setChannel()
+        self.HdhrSet(
+                "/tuner%d/program"%( self.channel.tuner.tuner_id),
+                self.number )
+
 
 def main():
+
     try:
-        opts, args = getopt.getopt(sys.argv[1:], "ho:v", ["help", "output="])
+        opts, args = getopt.getopt(
+                        sys.argv[1:],
+                        "hlc:v",
+                        ["help", "list-channels", "channel="]
+                    )
+
     except getopt.GetoptError as err:
         # print help information and exit:
         print str(err) # will print something like "option -a not recognized"
         usage()
         sys.exit(2)
-    output = None
+
+    channel_id = 0
+    program_id = 0
+    mode_list = False
+    mode_view = False
     verbose = False
+
     for o, a in opts:
         if o == "-v":
             verbose = True
         elif o in ("-h", "--help"):
             usage()
             sys.exit()
-        elif o in ("-o", "--output"):
-            output = a
+        elif o in ("-l", "--list-channels"):
+            mode_list = True
+        elif o in ("-c", "--channel"):
+            m = re.compile("^([0-9]+)-([0-9]+)$").match(a)
+            if m:
+                channel_id = int(m.group(1))
+                program_id = int(m.group(2))
+            else:
+                assert False, "couldn't parse channel"
+            mode_view = True
         else:
             assert False, "unhandled option"
-    # ...
+    if mode_list:
+        d = Device()
+        t = d.selectTuner(0)
+        for c in t.getChannels():
+            for p in c.getPrograms():
+                print "%2d-%d: %s"%(c.number, p.number, p.description)
+
+    if mode_view:
+        d = Device()
+        t = d.selectTuner(0)
+        for c in t.getChannels():
+            if c.number == channel_id:
+                for p in c.getPrograms():
+                    if p.number == program_id:
+                        local_display()
+                        time.sleep(2)
+                        p.setProgram()
+                        t.setTarget(get_local_ip(), LOCAL_PORT)
+
+
+def local_display():
+        cmd = "vlc udp://@:%s &"%(LOCAL_PORT)
+        if os.system(cmd) != 0:
+                print "ERROR: %s"%(cmd)
+
+def get_local_ip():
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+        try:
+            s.connect(("8.8.8.8", 9))
+            client = s.getsockname()[0]
+        except socket.error:
+            client = "Unknown IP"
+        finally:
+            del s
+        print "DEBUG: Got Local IP = %s"%(client)
+        return client
+
+def usage():
+    print """
+hdtv <OPTIONS>
+
+OPTIONS (Modes)
+
+    -l          list available channels
+
+    -c <CC-P>   play channel
+
+"""
 
 if __name__ == "__main__":
     main()
 
+#
+# vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4
