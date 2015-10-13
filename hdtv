@@ -105,7 +105,11 @@ class Tuner(Hdhr):
         self.device = device
         self.tuner_id=tuner_number
         self.channel_list=[]
-        self.__tuner_cache_file="%s/tuner%d.cache"%(CONFIG_DIR,self.tuner_id)
+        self.__tuner_cache_file="%s/%s.t%d.cache"%(
+                                    CONFIG_DIR,
+                                    self.device.device_id,
+                                    self.tuner_id
+                                )
         if not os.path.exists(self.__tuner_cache_file):
             print "building channel scan cache (%s)..."%(
                     self.__tuner_cache_file)
@@ -121,25 +125,25 @@ class Tuner(Hdhr):
         re_program=re.compile("^PROGRAM ([0-9]+): (.*)$")
         channel_number=0
         channel=None
-        f = open(self.__tuner_cache_file)
-        for l in f.readlines():
-            m = re_channel.match(l)
-            if m:
-                channel_number = int(m.group(1))
-                continue
+        with open(self.__tuner_cache_file) as f:
+            for l in f.readlines():
+                m = re_channel.match(l)
+                if m:
+                    channel_number = int(m.group(1))
+                    continue
 
-            m = re_lock.match(l)
-            if m:
-                lock = m.group(1)
-                if lock != "none":
+                m = re_lock.match(l)
+                if m:
+                    lock = m.group(1)
+                    if lock != "none":
                         channel=Channel(self, channel_number)
                         self.channel_list.append(channel)
 
-            m = re_program.match(l)
-            if m:
-                program_number = int(m.group(1))
-                program_description = m.group(2)
-                channel.addProgram(program_number,program_description)
+                m = re_program.match(l)
+                if m:
+                    program_number = int(m.group(1))
+                    program_description = m.group(2)
+                    channel.addProgram(program_number,program_description)
 
     def __str__(self):
         return "Tuner %d"%(self.number)
@@ -206,8 +210,8 @@ def main():
     try:
         opts, args = getopt.getopt(
                         sys.argv[1:],
-                        "hlc:v",
-                        ["help", "list-channels", "channel="]
+                        "hd:t:v",
+                        ["help", "device=", "tuner=", "verbose"]
                     )
 
     except getopt.GetoptError as err:
@@ -216,40 +220,39 @@ def main():
         usage()
         sys.exit(2)
 
-    channel_id = 0
-    program_id = 0
-    mode_list = False
-    mode_view = False
+    device_id = None
+    tuner_id = 0
     verbose = False
 
     for o, a in opts:
         if o == "-v":
             verbose = True
-        elif o in ("-h", "--help"):
-            usage()
-            sys.exit()
-        elif o in ("-l", "--list-channels"):
-            mode_list = True
-        elif o in ("-c", "--channel"):
-            m = re.compile("^([0-9]+)-([0-9]+)$").match(a)
-            if m:
-                channel_id = int(m.group(1))
-                program_id = int(m.group(2))
-            else:
-                assert False, "couldn't parse channel"
-            mode_view = True
+        elif o in ("-d", "--device"):
+            device_id = a
+        elif o in ("-t", "--tuner"):
+            tuner_id = int(a)
         else:
             assert False, "unhandled option"
-    if mode_list:
-        d = Device()
-        t = d.selectTuner(0)
+
+    if args[0] == "help":
+        usage()
+        sys.exit()
+
+    d = Device(device_id)
+    t = d.selectTuner(tuner_id)
+
+    if args[0] == "list":
         for c in t.getChannels():
             for p in c.getPrograms():
                 print "%2d-%d: %s"%(c.number, p.number, p.description)
 
-    if mode_view:
-        d = Device()
-        t = d.selectTuner(0)
+    if args[0] == "view":
+        m = re.compile("^([0-9]+)-([0-9]+)$").match(args[1])
+        if m:
+            channel_id = int(m.group(1))
+            program_id = int(m.group(2))
+        else:
+            assert False, "couldn't parse channel"
         for c in t.getChannels():
             if c.number == channel_id:
                 for p in c.getPrograms():
@@ -280,15 +283,25 @@ def get_local_ip():
 
 def usage():
     print """
-hdtv <OPTIONS>
+hdtv [ OPTIONS ] <COMMAND>
 
-OPTIONS (Modes)
+OPTIONS
 
-    -l          list available channels
+    --device <ID>     tuner number (DEFAULT: %(DEFAULT_DEVICE_ID)s)
 
-    -c <CC-P>   play channel
+    --tuner <N>     tuner number (DEFAULT: 0)
 
-"""
+COMMANDS
+
+    help            this cruft
+
+    list            list available channels
+
+    view <CC-P>     play channel
+
+""" % {
+        "DEFAULT_DEVICE_ID": '',
+    }
 
 if __name__ == "__main__":
     main()

@@ -1,6 +1,31 @@
 hdtv
-----
+====
+
 command line utility to use the HDHomeRun device from the shell
 
+Usage
+-----
+
+    hdtv [ OPTIONS ] <COMMAND>
+
+    OPTIONS
+
+        --device <ID>     tuner number (DEFAULT: )
+
+        --tuner <N>     tuner number (DEFAULT: 0)
+
+    COMMANDS
+
+        help            this cruft
+
+        list            list available channels
+
+        view <CC-P>     play channel
+
+Requirements
+------------
+
+  * hdhomerun-config
+  * vlc
 
 Copyright 2015 Philip J Freeman <elektron@halo.nu>
