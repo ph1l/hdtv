@@ -28,6 +28,7 @@ import re
 import socket
 import sys
 import time
+from distutils.version import StrictVersion
 
 CONFIG_DIR="%s/.hdtv" % (os.getenv("HOME", default="."))
 LOCAL_PORT=1234
@@ -244,9 +245,9 @@ def main():
     t = d.selectTuner(tuner_id)
 
     if args[0] == "list":
-        for c in t.getChannels():
-            for p in c.getPrograms():
-                print "%s: %s"%(p.display_channel, p.description)
+        channels = get_display_channel_dict(t)
+        for channel_name in sorted(channels.keys(), key=StrictVersion):
+            print "%s: %s"%(channel_name, channels[channel_name].description)
 
     if args[0] == "view":
         m = re.compile("^([0-9]+\.[0-9]+)$").match(args[1])
@@ -261,6 +262,13 @@ def main():
                     time.sleep(2)
                     p.setProgram()
                     t.setTarget(get_local_ip(), LOCAL_PORT)
+
+def get_display_channel_dict(tuner):
+    l={}
+    for c in tuner.getChannels():
+        for p in c.getPrograms():
+            l[p.display_channel] = p
+    return l
 
 
 def local_display():
