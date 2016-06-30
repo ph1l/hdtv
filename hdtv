@@ -122,7 +122,7 @@ class Tuner(Hdhr):
         #Load Channel info from Cache
         re_channel=re.compile("^SCANNING: [0-9]+ \(.*:([0-9]+)\)$")
         re_lock=re.compile("^LOCK: ([^ ]+) \(.*\)$")
-        re_program=re.compile("^PROGRAM ([0-9]+): (.*)$")
+        re_program=re.compile("^PROGRAM ([0-9]+): ([0-9]+\.[0-9]+) (.*)$")
         channel_number=0
         channel=None
         with open(self.__tuner_cache_file) as f:
@@ -142,8 +142,9 @@ class Tuner(Hdhr):
                 m = re_program.match(l)
                 if m:
                     program_number = int(m.group(1))
-                    program_description = m.group(2)
-                    channel.addProgram(program_number,program_description)
+                    display_channel = m.group(2)
+                    program_description = m.group(3)
+                    channel.addProgram(program_number,display_channel,program_description)
 
     def __str__(self):
         return "Tuner %d"%(self.number)
@@ -173,8 +174,8 @@ class Channel(Hdhr):
     def getDeviceId(self):
         return self.tuner.device.device_id
 
-    def addProgram(self, program_number, description):
-        self.program_list.append(Program(self,program_number,description))
+    def addProgram(self, program_number, display_channel, description):
+        self.program_list.append(Program(self, program_number, display_channel, description))
 
     def getPrograms(self):
         return self.program_list
@@ -187,9 +188,10 @@ class Program(Hdhr):
     """
     """
 
-    def __init__(self, channel, program_number, description):
+    def __init__(self, channel, program_number, display_channel, description):
         self.channel=channel
         self.number=program_number
+        self.display_channel=display_channel
         self.description=description
 
     def __str__(self):
@@ -244,23 +246,21 @@ def main():
     if args[0] == "list":
         for c in t.getChannels():
             for p in c.getPrograms():
-                print "%2d-%d: %s"%(c.number, p.number, p.description)
+                print "%s: %s"%(p.display_channel, p.description)
 
     if args[0] == "view":
-        m = re.compile("^([0-9]+)-([0-9]+)$").match(args[1])
+        m = re.compile("^([0-9]+\.[0-9]+)$").match(args[1])
         if m:
-            channel_id = int(m.group(1))
-            program_id = int(m.group(2))
+            channel = m.group(1)
         else:
             assert False, "couldn't parse channel"
         for c in t.getChannels():
-            if c.number == channel_id:
-                for p in c.getPrograms():
-                    if p.number == program_id:
-                        local_display()
-                        time.sleep(2)
-                        p.setProgram()
-                        t.setTarget(get_local_ip(), LOCAL_PORT)
+            for p in c.getPrograms():
+                if p.display_channel == channel:
+                    local_display()
+                    time.sleep(2)
+                    p.setProgram()
+                    t.setTarget(get_local_ip(), LOCAL_PORT)
 
 
 def local_display():
@@ -297,7 +297,7 @@ COMMANDS
 
     list            list available channels
 
-    view <CC-P>     play channel
+    view <CHANNEL>  play channel
 
 """ % {
         "DEFAULT_DEVICE_ID": '',
