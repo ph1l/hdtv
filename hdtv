@@ -28,6 +28,7 @@ import re
 import socket
 import sys
 import time
+import ConfigParser
 from distutils.version import StrictVersion
 
 CONFIG_DIR="%s/.hdtv" % (os.getenv("HOME", default="."))
@@ -226,6 +227,13 @@ def main():
     device_id = None
     tuner_id = 0
     verbose = False
+
+    config = ConfigParser.ConfigParser()
+    config.read(os.path.expanduser('~/.hdtv/config'))
+    try:
+        device_id = config.get('device','id')
+    except:
+        pass
 
     for o, a in opts:
         if o == "-v":
